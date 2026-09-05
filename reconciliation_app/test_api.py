@@ -1,4 +1,5 @@
 import io
+from unittest import result
 
 from django.test import TestCase
 from rest_framework.test import APIClient
@@ -433,6 +434,16 @@ class ReconciliationRunApiTests(TestCase):
                 for candidate in result["candidates"]
             },
             {"C-2001", "C-2002"},
+        )
+
+        self.assertEqual(
+            result["candidates"][0]["instrument"],
+            "SOL",
+        )
+
+        self.assertEqual(
+            result["candidates"][0]["unit_price"],
+            "149.00000000",
         )
 
 

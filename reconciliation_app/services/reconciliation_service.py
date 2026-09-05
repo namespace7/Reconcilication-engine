@@ -168,20 +168,26 @@ def run_reconciliation(
                     ]
 
                 candidates = [
-                                {
-                                    "transaction_id": external_domain_by_id[
-                                        id(candidate.transaction)
-                                    ].transaction_id,
-                                    "source_reference": candidate.transaction.source_reference,
-                                    "score": candidate.score,
-                                    "reasons": candidate.reasons,
-                                    "timestamp_difference_seconds": (
-                                        candidate.timestamp_difference_seconds
-                                    ),
-                                    "quantity_difference": str(
-                                        candidate.quantity_difference
-                                    ),
-                                }
+                            {
+                                "transaction_id": external_domain_by_id[
+                                    id(candidate.transaction)
+                                ].transaction_id,
+                                "source_reference": candidate.transaction.source_reference,
+                                "instrument": candidate.transaction.instrument,
+                                "side": candidate.transaction.side.value,
+                                "quantity": str(candidate.transaction.quantity),
+                                "unit_price": str(candidate.transaction.unit_price),
+                                "amount": str(candidate.transaction.amount),
+                                "timestamp": candidate.transaction.timestamp.isoformat(),
+                                "score": candidate.score,
+                                "reasons": candidate.reasons,
+                                "timestamp_difference_seconds": (
+                                    candidate.timestamp_difference_seconds
+                                ),
+                                "quantity_difference": str(
+                                    candidate.quantity_difference
+                                ),
+                            }
                                 for candidate in engine_result.candidates
                             ]
 

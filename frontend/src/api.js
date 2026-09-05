@@ -48,6 +48,7 @@ export const getRun = async (runId) => {
 
 export const createManualDecision = async (
   resultId,
+  decision,
   externalTransactionId,
   reason,
   decidedBy,
@@ -58,8 +59,10 @@ export const createManualDecision = async (
       "Content-Type": "application/json",
     },
     body: JSON.stringify({
-      decision: "MATCH",
-      external_transaction_id: externalTransactionId,
+      decision,
+      ...(externalTransactionId
+        ? { external_transaction_id: externalTransactionId }
+        : {}),
       reason,
       decided_by: decidedBy,
     }),
