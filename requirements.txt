@@ -1,0 +1,6 @@
+Django==4.2.30
+djangorestframework==3.16.1
+psycopg==3.2.13
+psycopg-binary==3.2.13
+pytest==8.4.2
+pytest-django==4.11.1
