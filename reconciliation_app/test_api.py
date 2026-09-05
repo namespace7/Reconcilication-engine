@@ -2,9 +2,11 @@ import io
 
 from django.test import TestCase
 from rest_framework.test import APIClient
+from decimal import Decimal
 
-from .models import Source
 
+from .models import Source, File, RuleSet, ReconciliationRun
+from .services.file_ingestion import ingest_file
 
 class FileUploadApiTests(TestCase):
     def setUp(self):
@@ -66,3 +68,121 @@ class FileUploadApiTests(TestCase):
         self.assertEqual(second_response.status_code, 200)
         self.assertEqual(second_response.data["status"], "DUPLICATE")
         self.assertEqual(second_response.data["versions_created"], 0)
+
+
+class ReconciliationRunApiTests(TestCase):
+    def setUp(self):
+        self.client = APIClient()
+
+        self.our_source = Source.objects.create(
+            name="Our System",
+            source_type="OUR_LEDGER",
+        )
+
+        self.external_source = Source.objects.create(
+            name="External System",
+            source_type="EXTERNAL_STATEMENT",
+        )
+
+        self.ruleset = RuleSet.objects.create(
+            name="Default",
+            version=1,
+            amount_tolerance=Decimal("10"),
+            price_tolerance=Decimal("5"),
+            quantity_tolerance=Decimal("0"),
+            time_tolerance_seconds=60,
+        )
+
+    def create_our_file(self):
+        csv_content = (
+            "trade_id,traded_at,instrument,side,quantity,price,"
+            "gross_amount,state\n"
+            "T-1001,2026-09-01T10:00:00+00:00,BTC,BUY,0.5,"
+            "62000,31000,SETTLED\n"
+        )
+
+        result = ingest_file(
+            source=self.our_source,
+            filename="our.csv",
+            file_bytes=csv_content.encode("utf-8"),
+        )
+
+        return result["file"]
+
+    def create_external_file(self):
+        csv_content = (
+            "reference,executed_at,symbol,direction,qty,unit_price,"
+            "total,status\n"
+            "T-1001,2026-09-01T10:00:10+00:00,BTC,B,0.5,"
+            "62000,31000,SETTLED\n"
+        )
+
+        result = ingest_file(
+            source=self.external_source,
+            filename="external.csv",
+            file_bytes=csv_content.encode("utf-8"),
+        )
+
+        return result["file"]
+
+    def test_create_reconciliation_run(self):
+        our_file = self.create_our_file()
+        external_file = self.create_external_file()
+
+        response = self.client.post(
+            "/api/runs/",
+            {
+                "our_file_id": our_file.id,
+                "external_file_id": external_file.id,
+                "ruleset_id": self.ruleset.id,
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(response.data["status"], "COMPLETED")
+
+        run = ReconciliationRun.objects.get(id=response.data["id"])
+
+        self.assertEqual(run.our_file_id, our_file.id)
+        self.assertEqual(run.external_file_id, external_file.id)
+        self.assertEqual(run.ruleset_id, self.ruleset.id)
+
+        self.assertEqual(run.results.count(), 1)
+
+        result = run.results.first()
+
+        self.assertEqual(
+            result.status,
+            "MATCHED_WITH_DIFFERENCES",
+        )
+
+    def test_create_run_requires_file_ids_and_ruleset(self):
+        response = self.client.post(
+            "/api/runs/",
+            {},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(
+            response.data["error"],
+            "our_file_id is required",
+        )
+
+    def test_create_run_returns_404_for_missing_file(self):
+        response = self.client.post(
+            "/api/runs/",
+            {
+                "our_file_id": 99999,
+                "external_file_id": 99998,
+                "ruleset_id": self.ruleset.id,
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 404)
+        self.assertEqual(
+            response.data["error"],
+            "Our file not found",
+        )

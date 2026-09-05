@@ -2,8 +2,9 @@ from rest_framework import status
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from .models import File, Source
+from .models import File, Source, RuleSet, ReconciliationRun
 from .services.file_ingestion import ingest_file
+from .services.reconciliation_service import run_reconciliation
 
 
 class FileUploadView(APIView):
@@ -66,4 +67,76 @@ class FileUploadView(APIView):
                 if result["status"] == "DUPLICATE"
                 else status.HTTP_201_CREATED
             ),
+        )
+
+
+class ReconciliationRunCreateView(APIView):
+    """
+    Start a reconciliation between two uploaded files.
+    """
+
+    def post(self, request):
+        our_file_id = request.data.get("our_file_id")
+        external_file_id = request.data.get("external_file_id")
+        ruleset_id = request.data.get("ruleset_id")
+
+        if not our_file_id:
+            return Response(
+                {"error": "our_file_id is required"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        if not external_file_id:
+            return Response(
+                {"error": "external_file_id is required"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        if not ruleset_id:
+            return Response(
+                {"error": "ruleset_id is required"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        try:
+            our_file = File.objects.get(id=our_file_id)
+        except File.DoesNotExist:
+            return Response(
+                {"error": "Our file not found"},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        try:
+            external_file = File.objects.get(id=external_file_id)
+        except File.DoesNotExist:
+            return Response(
+                {"error": "External file not found"},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        try:
+            ruleset = RuleSet.objects.get(id=ruleset_id)
+        except RuleSet.DoesNotExist:
+            return Response(
+                {"error": "Ruleset not found"},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        run = run_reconciliation(
+            our_file=our_file,
+            external_file=external_file,
+            ruleset=ruleset,
+        )
+
+        return Response(
+            {
+                "id": run.id,
+                "status": run.status,
+                "our_file_id": run.our_file_id,
+                "external_file_id": run.external_file_id,
+                "ruleset_id": run.ruleset_id,
+                "started_at": run.started_at,
+                "completed_at": run.completed_at,
+            },
+            status=status.HTTP_201_CREATED,
         )
