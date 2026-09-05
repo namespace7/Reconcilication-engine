@@ -168,19 +168,22 @@ def run_reconciliation(
                     ]
 
                 candidates = [
-                    {
-                        "source_reference": candidate.transaction.source_reference,
-                        "score": candidate.score,
-                        "reasons": candidate.reasons,
-                        "timestamp_difference_seconds": (
-                            candidate.timestamp_difference_seconds
-                        ),
-                        "quantity_difference": str(
-                            candidate.quantity_difference
-                        ),
-                    }
-                    for candidate in engine_result.candidates
-                ]
+                                {
+                                    "transaction_id": external_domain_by_id[
+                                        id(candidate.transaction)
+                                    ].transaction_id,
+                                    "source_reference": candidate.transaction.source_reference,
+                                    "score": candidate.score,
+                                    "reasons": candidate.reasons,
+                                    "timestamp_difference_seconds": (
+                                        candidate.timestamp_difference_seconds
+                                    ),
+                                    "quantity_difference": str(
+                                        candidate.quantity_difference
+                                    ),
+                                }
+                                for candidate in engine_result.candidates
+                            ]
 
                 ReconciliationResult.objects.create(
                     run=run,

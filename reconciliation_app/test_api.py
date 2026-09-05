@@ -372,4 +372,67 @@ class ReconciliationRunApiTests(TestCase):
         self.assertEqual(first_response.status_code, 201)
         self.assertEqual(second_response.status_code, 400)
 
+    def test_run_results_include_candidate_transaction_ids(self):
+        our_csv = (
+            "trade_id,traded_at,instrument,side,quantity,price,"
+            "gross_amount,state\n"
+            "T-2001,2026-09-01T10:20:00+00:00,SOL,BUY,100,149,"
+            "14900,SETTLED\n"
+        )
+
+        external_csv = (
+            "reference,executed_at,symbol,direction,qty,unit_price,"
+            "total,status\n"
+            "C-2001,2026-09-01T10:20:10+00:00,SOL,B,100,149,"
+            "14900,SETTLED\n"
+            "C-2002,2026-09-01T10:20:20+00:00,SOL,B,100,149,"
+            "14900,SETTLED\n"
+        )
+
+        our_result = ingest_file(
+            source=self.our_source,
+            filename="candidate-our.csv",
+            file_bytes=our_csv.encode("utf-8"),
+        )
+
+        external_result = ingest_file(
+            source=self.external_source,
+            filename="candidate-external.csv",
+            file_bytes=external_csv.encode("utf-8"),
+        )
+
+        create_response = self.client.post(
+            "/api/runs/",
+            {
+                "our_file_id": our_result["file"].id,
+                "external_file_id": external_result["file"].id,
+                "ruleset_id": self.ruleset.id,
+            },
+            format="json",
+        )
+
+        self.assertEqual(create_response.status_code, 201)
+
+        run_response = self.client.get(
+            f"/api/runs/{create_response.data['id']}/"
+        )
+
+        self.assertEqual(run_response.status_code, 200)
+
+        result = run_response.data["results"][0]
+
+        self.assertEqual(result["status"], "NEEDS_REVIEW")
+        self.assertEqual(len(result["candidates"]), 2)
+
+        for candidate in result["candidates"]:
+            self.assertIsNotNone(candidate["transaction_id"])
+
+        self.assertEqual(
+            {
+                candidate["source_reference"]
+                for candidate in result["candidates"]
+            },
+            {"C-2001", "C-2002"},
+        )
+
 
