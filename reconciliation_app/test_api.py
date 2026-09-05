@@ -186,3 +186,59 @@ class ReconciliationRunApiTests(TestCase):
             response.data["error"],
             "Our file not found",
         )
+
+    def test_get_reconciliation_run_returns_results_and_summary(self):
+        our_file = self.create_our_file()
+        external_file = self.create_external_file()
+
+        create_response = self.client.post(
+            "/api/runs/",
+            {
+                "our_file_id": our_file.id,
+                "external_file_id": external_file.id,
+                "ruleset_id": self.ruleset.id,
+            },
+            format="json",
+        )
+
+        self.assertEqual(create_response.status_code, 201)
+
+        run_id = create_response.data["id"]
+
+        response = self.client.get(f"/api/runs/{run_id}/")
+
+        self.assertEqual(response.status_code, 200)
+
+        self.assertEqual(response.data["id"], run_id)
+        self.assertEqual(response.data["status"], "COMPLETED")
+
+        self.assertEqual(
+            response.data["summary"]["MATCHED_WITH_DIFFERENCES"],
+            1,
+        )
+
+        self.assertEqual(len(response.data["results"]), 1)
+
+        result = response.data["results"][0]
+
+        self.assertEqual(
+            result["status"],
+            "MATCHED_WITH_DIFFERENCES",
+        )
+
+        self.assertEqual(
+            result["our_transaction"]["source_reference"],
+            "T-1001",
+        )
+
+        self.assertEqual(
+            result["external_transaction"]["source_reference"],
+            "T-1001",
+        )
+
+        self.assertEqual(
+            result["differences"][0]["field"],
+            "timestamp",
+        )
+
+
