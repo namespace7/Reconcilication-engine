@@ -203,7 +203,7 @@ class ReconciliationResult(models.Model):
     )
     confidence = models.PositiveIntegerField(null=True, blank=True)
 
-    differences_json = models.JSONField(default=dict)
+    differences_json = models.JSONField(default=list)
     candidates_json = models.JSONField(default=list)
 
     created_at = models.DateTimeField(auto_now_add=True)
@@ -232,15 +232,19 @@ class ManualDecision(models.Model):
         related_name="manual_decisions",
     )
 
-    our_version = models.ForeignKey(
-        TransactionVersion,
+    # The decision belongs to the underlying transactions, not
+    # to a particular historical version. This allows a human
+    # decision to survive future correction files.
+    our_transaction = models.ForeignKey(
+        Transaction,
         null=True,
         blank=True,
         on_delete=models.PROTECT,
         related_name="manual_our_decisions",
     )
-    external_version = models.ForeignKey(
-        TransactionVersion,
+
+    external_transaction = models.ForeignKey(
+        Transaction,
         null=True,
         blank=True,
         on_delete=models.PROTECT,
@@ -251,6 +255,15 @@ class ManualDecision(models.Model):
         max_length=20,
         choices=Decision.choices,
     )
+
     reason = models.TextField(blank=True)
     decided_by = models.CharField(max_length=100)
     decided_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["our_transaction", "external_transaction"],
+                name="unique_manual_transaction_pair",
+            ),
+        ]
