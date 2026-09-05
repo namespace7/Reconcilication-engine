@@ -5,7 +5,7 @@ from rest_framework.test import APIClient
 from decimal import Decimal
 
 
-from .models import Source, File, RuleSet, ReconciliationRun
+from .models import Source, File, RuleSet, ReconciliationRun, ManualDecision
 from .services.file_ingestion import ingest_file
 
 class FileUploadApiTests(TestCase):
@@ -240,5 +240,136 @@ class ReconciliationRunApiTests(TestCase):
             result["differences"][0]["field"],
             "timestamp",
         )
+
+    def test_create_manual_match_decision(self):
+        our_file = self.create_our_file()
+        external_file = self.create_external_file()
+
+        create_response = self.client.post(
+            "/api/runs/",
+            {
+                "our_file_id": our_file.id,
+                "external_file_id": external_file.id,
+                "ruleset_id": self.ruleset.id,
+            },
+            format="json",
+        )
+
+        self.assertEqual(create_response.status_code, 201)
+
+        run = ReconciliationRun.objects.get(
+            id=create_response.data["id"]
+        )
+        result = run.results.first()
+
+        external_transaction_id = (
+            result.external_version.transaction_id
+        )
+
+        response = self.client.post(
+            f"/api/results/{result.id}/decision/",
+            {
+                "decision": "MATCH",
+                "external_transaction_id": external_transaction_id,
+                "reason": "Confirmed manually",
+                "decided_by": "Yashwant",
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(response.data["decision"], "MATCH")
+
+        decision = ManualDecision.objects.get(id=response.data["id"])
+
+        self.assertEqual(
+            decision.our_transaction_id,
+            result.our_version.transaction_id,
+        )
+        self.assertEqual(
+            decision.external_transaction_id,
+            external_transaction_id,
+        )
+        self.assertEqual(decision.reason, "Confirmed manually")
+        self.assertEqual(decision.decided_by, "Yashwant")
+
+    def test_manual_match_requires_external_transaction(self):
+        our_file = self.create_our_file()
+        external_file = self.create_external_file()
+
+        create_response = self.client.post(
+            "/api/runs/",
+            {
+                "our_file_id": our_file.id,
+                "external_file_id": external_file.id,
+                "ruleset_id": self.ruleset.id,
+            },
+            format="json",
+        )
+
+        run = ReconciliationRun.objects.get(
+            id=create_response.data["id"]
+        )
+        result = run.results.first()
+
+        response = self.client.post(
+            f"/api/results/{result.id}/decision/",
+            {
+                "decision": "MATCH",
+                "decided_by": "Yashwant",
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(
+            response.data["error"],
+            "external_transaction_id is required for MATCH",
+        )
+
+    def test_duplicate_manual_decision_returns_400(self):
+        our_file = self.create_our_file()
+        external_file = self.create_external_file()
+
+        create_response = self.client.post(
+            "/api/runs/",
+            {
+                "our_file_id": our_file.id,
+                "external_file_id": external_file.id,
+                "ruleset_id": self.ruleset.id,
+            },
+            format="json",
+        )
+
+        run = ReconciliationRun.objects.get(
+            id=create_response.data["id"]
+        )
+        result = run.results.first()
+
+        external_transaction_id = (
+            result.external_version.transaction_id
+        )
+
+        payload = {
+            "decision": "MATCH",
+            "external_transaction_id": external_transaction_id,
+            "reason": "Confirmed manually",
+            "decided_by": "Yashwant",
+        }
+
+        first_response = self.client.post(
+            f"/api/results/{result.id}/decision/",
+            payload,
+            format="json",
+        )
+
+        second_response = self.client.post(
+            f"/api/results/{result.id}/decision/",
+            payload,
+            format="json",
+        )
+
+        self.assertEqual(first_response.status_code, 201)
+        self.assertEqual(second_response.status_code, 400)
 
 

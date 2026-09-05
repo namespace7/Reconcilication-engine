@@ -2,7 +2,7 @@ from rest_framework import status
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from .models import File, Source, RuleSet, ReconciliationRun
+from .models import File, ManualDecision, ReconciliationResult, ReconciliationRun, RuleSet, Source, Transaction
 from .services.file_ingestion import ingest_file
 from .services.reconciliation_service import run_reconciliation
 from django.shortcuts import get_object_or_404
@@ -227,4 +227,131 @@ class ReconciliationRunDetailView(APIView):
                 "summary": summary,
                 "results": serialized_results,
             }
+        )
+
+class ManualDecisionCreateView(APIView):
+    def post(self, request, result_id):
+        result = get_object_or_404(
+            ReconciliationResult.objects.select_related(
+                "run",
+                "our_version__transaction",
+                "external_version__transaction",
+            ),
+            id=result_id,
+        )
+
+        decision = request.data.get("decision")
+        external_transaction_id = request.data.get("external_transaction_id")
+        reason = request.data.get("reason", "")
+        decided_by = request.data.get("decided_by")
+
+        if decision not in {
+            ManualDecision.Decision.MATCH,
+            ManualDecision.Decision.NO_MATCH,
+        }:
+            return Response(
+                {"error": "decision must be MATCH or NO_MATCH"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        if not decided_by:
+            return Response(
+                {"error": "decided_by is required"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        if decision == ManualDecision.Decision.MATCH:
+            if not external_transaction_id:
+                return Response(
+                    {
+                        "error": (
+                            "external_transaction_id is required "
+                            "for MATCH"
+                        )
+                    },
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+            external_transaction = get_object_or_404(
+                Transaction,
+                id=external_transaction_id,
+            )
+
+            if result.our_version is None:
+                return Response(
+                    {"error": "Result has no our-side transaction"},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+            if result.external_version is not None:
+                existing_external_id = (
+                    result.external_version.transaction_id
+                )
+                if existing_external_id != external_transaction.id:
+                    return Response(
+                        {
+                            "error": (
+                                "External transaction does not match "
+                                "the result's existing pairing"
+                            )
+                        },
+                        status=status.HTTP_400_BAD_REQUEST,
+                    )
+
+            our_transaction = result.our_version.transaction
+
+        else:
+            our_transaction = (
+                result.our_version.transaction
+                if result.our_version is not None
+                else None
+            )
+            external_transaction = (
+                result.external_version.transaction
+                if result.external_version is not None
+                else None
+            )
+
+        try:
+            manual_decision = ManualDecision.objects.create(
+                result=result,
+                our_transaction=our_transaction,
+                external_transaction=external_transaction,
+                decision=decision,
+                reason=reason,
+                decided_by=decided_by,
+            )
+        except Exception as exc:
+            # The database constraint prevents duplicate decisions
+            # for the same transaction pair.
+            from django.db import IntegrityError
+
+            if isinstance(exc, IntegrityError):
+                return Response(
+                    {
+                        "error": (
+                            "A manual decision already exists "
+                            "for this transaction pair"
+                        )
+                    },
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            raise
+
+        return Response(
+            {
+                "id": manual_decision.id,
+                "result_id": result.id,
+                "decision": manual_decision.decision,
+                "our_transaction_id": (
+                    manual_decision.our_transaction_id
+                ),
+                "external_transaction_id": (
+                    manual_decision.external_transaction_id
+                ),
+                "reason": manual_decision.reason,
+                "decided_by": manual_decision.decided_by,
+                "decided_at": manual_decision.decided_at,
+            },
+            status=status.HTTP_201_CREATED,
         )
