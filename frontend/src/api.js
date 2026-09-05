@@ -68,3 +68,17 @@ export const createManualDecision = async (
     }),
   });
 };
+
+export const getCurrentRuleset = async () => {
+  return apiRequest("/api/rulesets/current/");
+};
+
+export const updateRuleset = async (rulesetId, values) => {
+  return apiRequest(`/api/rulesets/${rulesetId}/`, {
+    method: "PATCH",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(values),
+  });
+};

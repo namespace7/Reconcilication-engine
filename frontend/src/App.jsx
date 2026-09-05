@@ -1,5 +1,12 @@
-import { useState } from "react";
-import { createManualDecision, createRun, getRun, uploadFile } from "./api";
+import { useState, useEffect } from "react";
+import {
+  createManualDecision,
+  createRun,
+  getRun,
+  uploadFile,
+  getCurrentRuleset,
+  updateRuleset,
+} from "./api";
 import "./styles.css";
 
 const OUR_SOURCE_ID = 1;
@@ -26,6 +33,7 @@ function App() {
   const [uploading, setUploading] = useState(null);
   const [running, setRunning] = useState(false);
   const [error, setError] = useState("");
+  const [ruleset, setRuleset] = useState(null);
 
   const handleFileUpload = async (file, source, setFile, setFileId) => {
     if (!file) {
@@ -60,11 +68,7 @@ function App() {
     setRun(null);
 
     try {
-      const createdRun = await createRun(
-        ourFileId,
-        externalFileId,
-        DEFAULT_RULESET_ID,
-      );
+      const createdRun = await createRun(ourFileId, externalFileId, ruleset.id);
 
       const completedRun = await getRun(createdRun.id);
 
@@ -75,6 +79,20 @@ function App() {
       setRunning(false);
     }
   };
+
+  useEffect(() => {
+    const loadRuleset = async () => {
+      try {
+        const currentRuleset = await getCurrentRuleset();
+
+        setRuleset(currentRuleset);
+      } catch (err) {
+        setError(err.message);
+      }
+    };
+
+    loadRuleset();
+  }, []);
 
   return (
     <main className="app">
@@ -147,18 +165,18 @@ function App() {
       </section>
       <section className="run-card">
         <div>
-          <p className="label">Ruleset</p>
-
-          <h2>Default v1</h2>
-
-          <p className="muted">
-            Compare using the configured reconciliation tolerances.
-          </p>
+          {ruleset && (
+            <RulesetPanel
+              ruleset={ruleset}
+              onRulesetUpdated={setRuleset}
+              setError={setError}
+            />
+          )}
         </div>
 
         <button
           className="primary-button"
-          disabled={!ourFileId || !externalFileId || running}
+          disabled={!ourFileId || !externalFileId || running || !ruleset}
           onClick={handleRun}
         >
           {running ? "Running..." : "Run reconciliation"}
@@ -167,6 +185,169 @@ function App() {
       {error && <div className="error">{error}</div>}
       {run && <Results run={run} setError={setError} />}{" "}
     </main>
+  );
+}
+
+function RulesetPanel({ ruleset, onRulesetUpdated, setError }) {
+  const [open, setOpen] = useState(false);
+  const [saving, setSaving] = useState(false);
+
+  const [values, setValues] = useState({
+    amount_tolerance: ruleset.amount_tolerance,
+    price_tolerance: ruleset.price_tolerance,
+    quantity_tolerance: ruleset.quantity_tolerance,
+    time_tolerance_seconds: ruleset.time_tolerance_seconds,
+  });
+
+  const handleChange = (field, value) => {
+    setValues((current) => ({
+      ...current,
+      [field]: value,
+    }));
+  };
+
+  const handleSave = async () => {
+    setSaving(true);
+    setError("");
+
+    try {
+      const newRuleset = await updateRuleset(ruleset.id, values);
+
+      onRulesetUpdated(newRuleset);
+      setOpen(false);
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <section className="ruleset-section">
+      <div className="ruleset-header">
+        <div>
+          <p className="eyebrow">Ruleset</p>
+
+          <h2>
+            {ruleset.name} v{ruleset.version}
+          </h2>
+
+          <p className="muted">
+            Compare using the configured reconciliation tolerances.
+          </p>
+        </div>
+
+        <div className="ruleset-actions">
+          <button className="secondary-button" onClick={() => setOpen(!open)}>
+            {open ? "Close settings" : "Configure rules"}
+          </button>
+        </div>
+      </div>
+
+      <div className="ruleset-summary">
+        <RuleValue label="Time" value={`${ruleset.time_tolerance_seconds}s`} />
+
+        <RuleValue label="Quantity" value={ruleset.quantity_tolerance} />
+
+        <RuleValue label="Price" value={ruleset.price_tolerance} />
+
+        <RuleValue label="Amount" value={ruleset.amount_tolerance} />
+      </div>
+
+      {open && (
+        <div className="ruleset-editor">
+          <div>
+            <p className="eyebrow">Configure rules</p>
+
+            <h3>Reconciliation tolerances</h3>
+
+            <p className="muted">
+              Changes create a new ruleset version. Previous reconciliation runs
+              keep their original rules.
+            </p>
+          </div>
+
+          <div className="ruleset-form">
+            <RuleInput
+              label="Time tolerance"
+              suffix="seconds"
+              value={values.time_tolerance_seconds}
+              onChange={(value) =>
+                handleChange("time_tolerance_seconds", value)
+              }
+            />
+
+            <RuleInput
+              label="Quantity tolerance"
+              suffix="quantity"
+              value={values.quantity_tolerance}
+              onChange={(value) => handleChange("quantity_tolerance", value)}
+            />
+
+            <RuleInput
+              label="Price tolerance"
+              suffix="amount"
+              value={values.price_tolerance}
+              onChange={(value) => handleChange("price_tolerance", value)}
+            />
+
+            <RuleInput
+              label="Amount tolerance"
+              suffix="amount"
+              value={values.amount_tolerance}
+              onChange={(value) => handleChange("amount_tolerance", value)}
+            />
+          </div>
+
+          <div className="ruleset-editor-footer">
+            <button
+              className="secondary-button"
+              disabled={saving}
+              onClick={() => setOpen(false)}
+            >
+              Cancel
+            </button>
+
+            <button
+              className="primary-button"
+              disabled={saving}
+              onClick={handleSave}
+            >
+              {saving ? "Saving..." : "Save new version"}
+            </button>
+          </div>
+        </div>
+      )}
+    </section>
+  );
+}
+
+function RuleValue({ label, value }) {
+  return (
+    <div className="rule-value">
+      <span>{label}</span>
+      <strong>±{value}</strong>
+    </div>
+  );
+}
+
+function RuleInput({ label, suffix, value, onChange }) {
+  return (
+    <label className="rule-input">
+      <span>{label}</span>
+
+      <div className="rule-input-control">
+        <input
+          type="number"
+          min="0"
+          step="any"
+          value={value}
+          onChange={(event) => onChange(event.target.value)}
+        />
+
+        <span>{suffix}</span>
+      </div>
+    </label>
   );
 }
 

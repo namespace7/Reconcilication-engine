@@ -355,3 +355,172 @@ class ManualDecisionCreateView(APIView):
             },
             status=status.HTTP_201_CREATED,
         )
+
+class CurrentRuleSetView(APIView):
+    """
+    Return the latest version of the default reconciliation rules.
+    """
+
+    def get(self, request):
+        ruleset = (
+            RuleSet.objects
+            .filter(name="Default")
+            .order_by("-version")
+            .first()
+        )
+
+        if ruleset is None:
+            return Response(
+                {"error": "No ruleset configured"},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        return Response(serialize_ruleset(ruleset))
+
+
+class RuleSetDetailView(APIView):
+    """
+    GET: inspect a specific ruleset version.
+
+    PATCH: create the next version without modifying
+    the existing ruleset.
+    """
+
+    def get(self, request, ruleset_id):
+        ruleset = get_object_or_404(
+            RuleSet,
+            id=ruleset_id,
+        )
+
+        return Response(serialize_ruleset(ruleset))
+
+    def patch(self, request, ruleset_id):
+        ruleset = get_object_or_404(
+            RuleSet,
+            id=ruleset_id,
+        )
+
+        fields = [
+            "amount_tolerance",
+            "price_tolerance",
+            "quantity_tolerance",
+            "time_tolerance_seconds",
+        ]
+
+        values = {}
+
+        for field in fields:
+            if field in request.data:
+                values[field] = request.data[field]
+
+        if not values:
+            return Response(
+                {
+                    "error": (
+                        "At least one ruleset value "
+                        "must be provided"
+                    )
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        # Validate using the existing RuleSet field types.
+        for field, value in values.items():
+            field_definition = RuleSet._meta.get_field(field)
+
+            try:
+                cleaned_value = field_definition.to_python(value)
+            except (TypeError, ValueError):
+                return Response(
+                    {
+                        "error": (
+                            f"Invalid value for {field}"
+                        )
+                    },
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+            if cleaned_value is None:
+                return Response(
+                    {
+                        "error": (
+                            f"{field} cannot be null"
+                        )
+                    },
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+            if cleaned_value < 0:
+                return Response(
+                    {
+                        "error": (
+                            f"{field} cannot be negative"
+                        )
+                    },
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+            values[field] = cleaned_value
+
+        latest_version = (
+            RuleSet.objects
+            .filter(name=ruleset.name)
+            .order_by("-version")
+            .first()
+        )
+
+        next_version = (
+            latest_version.version + 1
+            if latest_version is not None
+            else ruleset.version + 1
+        )
+
+        new_ruleset = RuleSet.objects.create(
+            name=ruleset.name,
+            version=next_version,
+            amount_tolerance=values.get(
+                "amount_tolerance",
+                ruleset.amount_tolerance,
+            ),
+            price_tolerance=values.get(
+                "price_tolerance",
+                ruleset.price_tolerance,
+            ),
+            quantity_tolerance=values.get(
+                "quantity_tolerance",
+                ruleset.quantity_tolerance,
+            ),
+            time_tolerance_seconds=values.get(
+                "time_tolerance_seconds",
+                ruleset.time_tolerance_seconds,
+            ),
+        )
+
+        return Response(
+            serialize_ruleset(new_ruleset),
+            status=status.HTTP_201_CREATED,
+        )
+
+
+def serialize_ruleset(ruleset):
+    return {
+        "id": ruleset.id,
+        "name": ruleset.name,
+        "version": ruleset.version,
+        "amount_tolerance": format(
+            ruleset.amount_tolerance,
+            ".8f",
+        ),
+        "price_tolerance": format(
+            ruleset.price_tolerance,
+            ".8f",
+        ),
+        "quantity_tolerance": format(
+            ruleset.quantity_tolerance,
+            ".8f",
+        ),
+        "time_tolerance_seconds": (
+            ruleset.time_tolerance_seconds
+        ),
+        "created_at": ruleset.created_at,
+    }

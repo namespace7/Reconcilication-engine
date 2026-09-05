@@ -4,6 +4,11 @@ from unittest import result
 from django.test import TestCase
 from rest_framework.test import APIClient
 from decimal import Decimal
+from reconciliation_app.models import RuleSet
+from reconciliation_app.models import (
+    ReconciliationRun,
+    RuleSet,
+)
 
 
 from .models import Source, File, RuleSet, ReconciliationRun, ManualDecision
@@ -444,6 +449,135 @@ class ReconciliationRunApiTests(TestCase):
         self.assertEqual(
             result["candidates"][0]["unit_price"],
             "149.00000000",
+        )
+
+    def test_get_current_ruleset_returns_latest_version(self):
+        response = self.client.get(
+            "/api/rulesets/current/"
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["id"], self.ruleset.id)
+        self.assertEqual(response.data["version"], 1)
+        self.assertEqual(
+            response.data["amount_tolerance"],
+            "10.00000000",
+        )
+        self.assertEqual(
+            response.data["price_tolerance"],
+            "5.00000000",
+        )
+
+    def test_patch_ruleset_creates_new_version(self):
+        response = self.client.patch(
+            f"/api/rulesets/{self.ruleset.id}/",
+            {
+                "amount_tolerance": "20",
+                "price_tolerance": "20",
+                "quantity_tolerance": "0",
+                "time_tolerance_seconds": 120,
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 201)
+
+        self.assertEqual(
+            response.data["version"],
+            2,
+        )
+
+        self.assertEqual(
+            response.data["amount_tolerance"],
+            "20.00000000",
+        )
+
+        self.assertEqual(
+            response.data["price_tolerance"],
+            "20.00000000",
+        )
+
+        self.assertEqual(
+            response.data["time_tolerance_seconds"],
+            120,
+        )
+
+        # v1 must remain unchanged.
+        original = RuleSet.objects.get(
+            id=self.ruleset.id
+        )
+
+        self.assertEqual(original.version, 1)
+
+        self.assertEqual(
+            str(original.amount_tolerance),
+            "10.00000000",
+        )
+
+        self.assertEqual(
+            str(original.price_tolerance),
+            "5.00000000",
+        )
+
+    def test_existing_run_keeps_original_ruleset_version(self):
+        # Create the files needed for the run.
+        our_file = self.create_our_file()
+        external_file = self.create_external_file()
+
+        # Create a run using v1.
+        run_response = self.client.post(
+            "/api/runs/",
+            {
+                "our_file_id": our_file.id,
+                "external_file_id": external_file.id,
+                "ruleset_id": self.ruleset.id,
+            },
+        )
+
+        self.assertEqual(
+            run_response.status_code,
+            201,
+        )
+
+        run_id = run_response.data["id"]
+
+        # Create v2.
+        update_response = self.client.patch(
+            f"/api/rulesets/{self.ruleset.id}/",
+            {
+                "price_tolerance": "20",
+            },
+            format="json",
+        )
+
+        self.assertEqual(
+            update_response.status_code,
+            201,
+        )
+
+        self.assertEqual(
+            update_response.data["version"],
+            2,
+        )
+
+        # Historical run must still reference v1.
+        run = ReconciliationRun.objects.get(
+            id=run_id
+        )
+
+        self.assertEqual(
+            run.ruleset_id,
+            self.ruleset.id,
+        )
+
+        self.assertEqual(
+            run.ruleset.version,
+            1,
+        )
+
+        self.assertEqual(
+            str(run.ruleset.price_tolerance),
+            "5.00000000",
         )
 
 
