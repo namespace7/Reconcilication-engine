@@ -4,7 +4,7 @@ source .venv/bin/activate
 
 pip install -r requirements.txt
 
-#Run migrations:
+# Run migrations:
 python manage.py migrate
 
 python manage.py shell
